@@ -1,0 +1,1 @@
+eosio-cpp -abigen defrex.cpp -o defrex.wasm
