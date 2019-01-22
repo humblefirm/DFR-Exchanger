@@ -3,8 +3,12 @@
 #include <eosiolib/asset.hpp>
 #include <vector>
 
+#include "/usr/local/include/rapidjson/document.h"  
+#include "/usr/local/include/rapidjson/prettywriter.h"
+
 using namespace eosio;
 using namespace std;
+using namespace rapidjson;
 
 class[[eosio::contract]] defrex : public eosio::contract
 {
@@ -65,46 +69,42 @@ class[[eosio::contract]] defrex : public eosio::contract
 
 	[[eosio::action]] void income() {
 		auto transfer_data = unpack_action_data<st_transfer>();
+		char buffer[transfer_data.memo.size()+1];
 		bool fromIsKey = false;
 
+		Document document;
 		public_key fromKey;
 		string fromKeyStr;
 		vector<string> idxData;
 		vector<string> extraData;
-
-		string memo_data = transfer_data.memo;
 		name sa;
 
 		if (transfer_data.from == _self || transfer_data.to != _self)
 			return;
-		idxData = split(memo_data.c_str(), '|');
-		extraData = split(idxData[1].c_str(), '$');
+		
+		strncpy(buffer, transfer_data.memo.c_str(), transfer_data.memo.size());
+		buffer[transfer_data.memo.size()+1] = '\0';
+		eosio_assert(!document.ParseInsitu(buffer).HasParseError(), "json parsing error");
+
 		if (transfer_data.from.value == name("").value)
 		{
 			fromIsKey = true;
-			switch (extraData.size())
-			{
-			case 4:
-				fromKey = str_to_pub(extraData[1]);
-				fromKeyStr = extraData[1];
-				break;
-			case 5:
-				fromKey = str_to_pub(extraData[2]);
-				fromKeyStr = extraData[2];
-				break; // from은 무조건 name인데 그럼 이 부분은 필요없는거 아닌가?
-			}
+
+			fromKey = str_to_pub(document["fromkey"].GetString());
+			fromKeyStr = document["fromkey"].GetString();		
 		}
 
 		/*if (transfer_data.memo.find('|') == string::npos)
 			return;*/
-		eosio_assert(transfer_data.memo.find('|') != string::npos, std::string("token Format not right").c_str());
-		switch (name{extraData[0]}.value)
+		eosio_assert(document["opt"].IsNull() || document["idx"].IsNull(), std::string("token Format not right").c_str());
+
+		switch (name{document["opt"].GetString()}.value)
 		{
 		case "trade"_n.value:
-			fromIsKey ? trade(fromKeyStr, transfer_data.to, transfer_data.quantity, idxData[0]) : trade(transfer_data.from, transfer_data.to, transfer_data.quantity, idxData[0]);
+			fromIsKey ? trade(fromKeyStr, transfer_data.to, transfer_data.quantity, document["idx"].GetInt()) : trade(transfer_data.from, transfer_data.to, transfer_data.quantity, document["idx"].GetInt());
 			break;
 		case "topupreserve"_n.value:
-			topupreserve(transfer_data.to, transfer_data.quantity, idxData[0]);
+			topupreserve(transfer_data.to, transfer_data.quantity, document["idx"].GetInt());
 			break;
 		}
 	}
@@ -117,12 +117,12 @@ class[[eosio::contract]] defrex : public eosio::contract
 
   private:
 	//함수
-	void topupreserve(name to, asset amount, std::string memo)
+	void topupreserve(name to, asset amount, int memo)
 	{
-		uint64_t idx = (uint64_t)std::stoi(memo);
+		uint64_t idx = (uint64_t)memo;
 		trades_table trades(to, to.value);
 		auto itr_trade = trades.find(idx);
-		eosio_assert(itr_trade != trades.end(), std::string("Trade [" + memo + "] not exists").c_str());
+		eosio_assert(itr_trade != trades.end(), std::string("Trade [" + std::to_string(memo) + "] not exists").c_str());
 		trades.modify(itr_trade, to, [&](auto &r) {
 			eosio_assert((amount.symbol == r.A.reserve.symbol && _code.value == r.A.code.value) || (amount.symbol == r.B.reserve.symbol && _code.value == r.B.code.value), "WRONG TOKEN!!");
 			if (amount.symbol == r.A.reserve.symbol && _code.value == r.A.code.value)
@@ -133,9 +133,9 @@ class[[eosio::contract]] defrex : public eosio::contract
 		});
 	}
 
-	void trade(name from, name to, asset amount, std::string memo)
+	void trade(name from, name to, asset amount, int memo)
 	{
-		uint64_t idx = (uint64_t)std::stoi(memo);
+		uint64_t idx = (uint64_t)memo;
 
 		trades_table trades(to, to.value);
 		auto itr_trade = trades.find(idx);
@@ -180,9 +180,9 @@ class[[eosio::contract]] defrex : public eosio::contract
 			}
 		});
 	}
-	void trade(string from, name to, asset amount, std::string memo)
+	void trade(string from, name to, asset amount, int memo)
 	{
-		uint64_t idx = (uint64_t)std::stoi(memo);
+		uint64_t idx = (uint64_t)memo;
 
 		trades_table trades(to, to.value);
 		auto itr_trade = trades.find(idx);
